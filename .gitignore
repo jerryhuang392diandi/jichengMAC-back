@@ -4,8 +4,9 @@ Thumbs.db
 *.swp
 *.tmp
 
-# Large media files require Git LFS on GitHub.
+# Videos are tracked through Git LFS when intentionally added.
 *.mp4
+!new_mac/doc/*.mp4
 
 # Common simulator outputs
 *.wlf
