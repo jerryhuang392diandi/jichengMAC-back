@@ -1,0 +1,17 @@
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+
+# Large media files require Git LFS on GitHub.
+*.mp4
+
+# Common simulator outputs
+*.wlf
+*.vcd
+*.fst
+*.log
+transcript
+work/
+_info
