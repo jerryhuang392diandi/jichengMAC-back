@@ -1,5 +1,8 @@
 # 三端口 MAC 遍历回环验证工程
 
+[GitHub 仓库](https://github.com/jerryhuang392diandi/jichengMAC-back) |
+[Gitee 仓库](https://gitee.com/jerryhqx/jichengMAC-back)
+
 本仓库是集成电路课程 final project 的 ModelSim 仿真工程。工程在老师提供的 MAC 核仿真环境基础上，将单端口自回环验证改造成三端口遍历回环验证。
 
 本次改造的核心目标是：不修改 `new_mac/hdl/` 下的 MAC 核 RTL，只通过 testbench 连接关系和仿真用例验证帧数据能按 `Port1 -> Port2 -> Port3 -> Port1` 的路径完整传递。
