@@ -3,15 +3,17 @@
 [GitHub 仓库](https://github.com/jerryhuang392diandi/jichengMAC-back) |
 [Gitee 仓库](https://gitee.com/jerryhqx/jichengMAC-back)
 
-本仓库是集成电路课程 final project 的 ModelSim 仿真工程。工程在老师提供的 MAC 核仿真环境基础上，将单端口自回环验证改造成三端口遍历回环验证。
+本仓库是集成电路课程 final project 的 ModelSim 仿真工程。工程基于老师给出的开源以太网 MAC 核和原始自回环仿真环境，将单端口回环验证扩展为三端口遍历回环验证。
 
-本次改造的核心目标是：不修改 `new_mac/hdl/` 下的 MAC 核 RTL，只通过 testbench 连接关系和仿真用例验证帧数据能按 `Port1 -> Port2 -> Port3 -> Port1` 的路径完整传递。
+本次改造的边界很明确：不修改 `new_mac/hdl/` 下 MAC 核 RTL，只在仿真层新增三端口连接、配置和验证逻辑。最终目标是证明一组以太网帧可以按 `Port1 -> Port2 -> Port3 -> Port1` 的路径完整走完，并且最终从 Port1 发出的数据与最初进入 Port1 的数据一致。
 
-## 拓扑结构
+## 验证拓扑
 
-![三端口 MAC 遍历回环拓扑](assets/topology.png)
+README 中使用的拓扑图已经放到仓库内，路径为 `./assets/topology.png`。不要再直接粘 CSDN 或网页外链图，否则在 GitHub/Gitee 上容易因为防盗链或图片权限失效而显示不出来。
 
-数据路径如下：
+![三端口 MAC 遍历回环拓扑](./assets/topology.png)
+
+数据流如下：
 
 ```text
 ephy 外部帧激励
@@ -23,136 +25,241 @@ ephy 外部帧激励
   -> Port3 物理侧回环
   -> Port3 MAC RX
   -> Port1 MAC TX
-  -> data_cmp 记录并比较最终输出
+  -> data_cmp 记录最终输出
 ```
 
-`data_cmp` 会同时记录 1 口输入和最终从 1 口输出的数据，生成 `indata.log` / `outdata.log`，用于判断三端口遍历后数据是否保持一致。
+`data_cmp` 同时监听 Port1 的物理侧输入和最终物理侧输出，生成：
+
+```text
+new_mac/sim/in_out/<testcase>_indata.log
+new_mac/sim/in_out/<testcase>_outdata.log
+```
+
+比较这两个日志即可判断三端口遍历之后数据是否保持一致。
+
+## MAC 核背景
+
+课程文档里的 MAC 核来自 OpenCores Ethernet MAC IP。它位于以太网数据链路层，负责把用户侧帧数据转换成可以送到 PHY 的 MII/GMII 数据流，也负责把 PHY 收到的帧还原成用户侧 FIFO 数据。
+
+该 MAC 核的主要功能包括：
+
+- 发送时自动添加前导码和帧起始标志 SFD，前导码为 7 字节 `0x55`，SFD 为 `0xd5`。
+- 对长度不足的帧进行填充，使以太网帧长度满足 64 字节最小帧长要求。
+- 接收时可进行 CRC 校验。
+- 支持 10M、100M、1000M 模式，课程实验主要使用 100M 和 1000M。
+- 1000M 全双工模式下支持标准流控机制。
+- 通过 MII/GMII 类接口与 PHY 侧连接，通过 FIFO 类接口与用户逻辑连接，通过 Host/Register 接口完成寄存器配置。
+
+本工程把它当成一个可配置的 MAC 黑盒使用，重点验证多个 MAC 实例之间的连接、回环和数据一致性。
 
 ## 工程目录
 
 ```text
 .
 ├── assets/
-│   └── topology.png                       # README 使用的三端口验证拓扑图
+│   └── topology.png
 ├── new_mac/
-│   ├── doc/                               # 实验文档、参考视频
-│   │   ├── 参考视频.mp4                   # Git LFS 跟踪的视频文件
+│   ├── doc/
+│   │   ├── 参考视频.mp4
 │   │   ├── 实验MAC核.docx
 │   │   ├── MAC核控制器及回环验证实验.pdf
 │   │   └── Modelsim仿真与FPGA工具应用.pdf
-│   ├── hdl/                               # MAC 核 RTL 源码
-│   │   ├── MAC_top.v                      # MAC 顶层
-│   │   ├── MAC_rx.v / MAC_tx.v            # 收发主模块
+│   ├── hdl/
+│   │   ├── MAC_top.v
+│   │   ├── MAC_rx.v / MAC_tx.v
 │   │   ├── MAC_rx_ctrl.v / MAC_tx_Ctrl.v
-│   │   └── ...                            # CRC、FIFO、RMON、寄存器等模块
-│   ├── rtl.f                              # RTL 文件列表
+│   │   ├── CRC_chk.v / CRC_gen.v
+│   │   ├── reg_int.v / RMON.v / Phy_int.v
+│   │   └── ...
+│   ├── rtl.f
 │   └── sim/
-│       ├── bfm/                           # 仿真辅助模型
-│       │   ├── ephy.v                     # 外部以太网帧激励
-│       │   ├── data_cmp.v                 # 输入/输出日志记录与比较
-│       │   ├── host_sim.v                 # CPU 配置接口仿真模型
-│       │   └── clockGenerator.v
+│       ├── bfm/
+│       │   ├── altera_mf.v
+│       │   ├── clockGenerator.v
+│       │   ├── data_cmp.v
+│       │   ├── ephy.v
+│       │   └── host_sim.v
 │       ├── filelist/
-│       │   ├── sim_filelist.v             # testbench/BFM 编译列表
-│       │   └── hdl_filelist.v             # RTL 编译列表
-│       ├── in_out/                        # 仿真输入/输出日志目录
+│       │   ├── hdl_filelist.v
+│       │   ├── rtl.f
+│       │   └── sim_filelist.v
+│       ├── in_out/
+│       │   ├── 0100000064_indata.log
+│       │   ├── 0100000064_outdata.log
+│       │   ├── 0100000065_indata.log
+│       │   └── 0100000065_outdata.log
 │       ├── run/
-│       │   ├── run.bat                    # Windows 下启动 ModelSim 的脚本
-│       │   ├── sim.do                     # ModelSim 编译和运行脚本
-│       │   ├── wave.do                    # 波形脚本占位文件
 │       │   ├── modelsim.ini
-│       │   └── top_define.v               # 仿真宏定义
+│       │   ├── run.bat
+│       │   ├── sim.do
+│       │   ├── top_define.v
+│       │   └── wave.do
 │       ├── testbench/
-│       │   └── testbench.v                # 三端口遍历回环 testbench
+│       │   └── testbench.v
 │       └── testcase/
-│           ├── 0100000064.v               # 100M 随机帧测试
-│           └── 0100000065.v               # 1000M 随机帧测试
-├── .gitattributes                         # Git LFS 规则
+│           ├── 0100000064.v
+│           └── 0100000065.v
+├── .gitattributes
 ├── .gitignore
 ├── LICENSE
 └── README.md
 ```
 
-## 关键实现
+其中：
 
-`new_mac/sim/testbench/testbench.v` 中实例化了 3 个 `MAC_top`：
+- `new_mac/hdl/` 是 MAC 核 RTL，不是本次改造重点。
+- `new_mac/sim/testbench/testbench.v` 是三端口连接和验证逻辑的核心文件。
+- `new_mac/sim/bfm/ephy.v` 负责产生外部以太网帧激励。
+- `new_mac/sim/bfm/host_sim.v` 负责模拟 CPU 写寄存器，配置 MAC 工作模式。
+- `new_mac/sim/bfm/data_cmp.v` 负责记录输入输出日志。
+- `new_mac/sim/run/sim.do` 是 ModelSim 编译、加载、运行脚本。
 
-```verilog
-MAC_top MAC_top_inst1(...);  // Port1
-MAC_top MAC_top_inst2(...);  // Port2
-MAC_top MAC_top_inst3(...);  // Port3
-```
+## 顶层引脚说明
 
-用户侧连接关系改为遍历路径：
+`new_mac/hdl/MAC_top.v` 的端口可以按功能分成四组。课程文档里给了 MAC 核外围管脚图，下面结合源码整理成表格。
 
-```text
-Port1 用户侧 RX -> Port2 用户侧 TX
-Port2 用户侧 RX -> Port3 用户侧 TX
-Port3 用户侧 RX -> Port1 用户侧 TX
-```
+| 接口组 | 主要信号 | 方向 | 作用 |
+| --- | --- | --- | --- |
+| 系统时钟与复位 | `Reset`、`Clk_125M`、`Clk_user`、`Clk_reg`、`Speed[2:0]` | 输入/输出 | 提供复位、125 MHz 基准时钟、用户侧时钟、寄存器配置时钟，并输出当前速率 |
+| 用户侧 RX FIFO | `ff_rx_rdy`、`ff_rx_data[31:0]`、`ff_rx_mod[1:0]`、`ff_rx_sop`、`ff_rx_eop`、`ff_rx_dsav`、`ff_rx_dval`、`rx_err[5:0]` | MAC 输出为主 | MAC 收到 PHY 侧帧后，将帧以 32 bit FIFO 格式交给用户逻辑 |
+| 用户侧 TX FIFO | `ff_tx_data[31:0]`、`ff_tx_mod[1:0]`、`ff_tx_sop`、`ff_tx_eop`、`ff_tx_wren`、`ff_tx_err`、`tx_ff_uflow`、`ff_tx_rdy`、`ff_tx_septy` | MAC 输入为主 | 用户逻辑把待发送帧写入 MAC，MAC 再从 PHY 侧发出 |
+| PHY/MII 侧 | `Rx_clk`、`Tx_clk`、`Rx_er`、`Rx_dv`、`Rxd[7:0]`、`Tx_er`、`Tx_en`、`Txd[7:0]`、`Crs`、`Col` | 双向 | 与 PHY 或仿真 PHY 模型连接，100M 时有效数据使用低 4 bit，1000M 时使用 8 bit |
+| Host/Register | `CSB`、`WRB`、`CD_in[15:0]`、`CD_out[15:0]`、`CA[7:0]` | 双向 | CPU/Host 配置接口，用于设置速率、水线、CRC、地址过滤等寄存器 |
 
-Port2 和 Port3 的 MII 物理侧做本地回环：
+本工程的三端口遍历主要改的是用户侧 FIFO 和 PHY/MII 侧连接；Host/Register 接口则复制三套 `host_sim`，分别配置三个 MAC 实例。
 
-```verilog
-hm_Rx_dv2 <= hm_Tx_en2;
-hm_Rxd2   <= hm_Txd2;
+## 仿真环境配置
 
-hm_Rx_dv3 <= hm_Tx_en3;
-hm_Rxd3   <= hm_Txd3;
-```
-
-三个 MAC 都通过 `host_sim` 完成速率配置。`0100000064.v` 配置为 100M，`0100000065.v` 配置为 1000M。仿真结束时，`testbench.v` 会打印 `PORT_COUNTS` 和 `USER_COUNTS`，用于检查中间端口是否真的完成收发。
-
-## 运行环境
+课程文档使用 Windows + ModelSim 作为主要仿真环境，文档中以 `modelsim10.1b` 为例，并说明一般要求 ModelSim 10.0 以上版本。本工程脚本同样按 Windows 下 ModelSim/QuestaSim 使用方式组织。
 
 推荐环境：
 
-- Windows
-- ModelSim / QuestaSim，命令行可直接调用 `vsim`
-- Git LFS，用于拉取 `new_mac/doc/参考视频.mp4`
+- Windows 10/11，或课程机房 Windows 环境。
+- ModelSim 10.x / QuestaSim，命令行能调用 `vsim`、`vlog`、`vlib`、`vmap`。
+- Git LFS，用于拉取 `new_mac/doc/参考视频.mp4`。
 
-第一次克隆仓库后，如果需要参考视频，先执行：
+### 1. 克隆仓库
+
+```bat
+git clone https://github.com/jerryhuang392diandi/jichengMAC-back.git
+cd jichengMAC-back
+```
+
+或者：
+
+```bat
+git clone https://gitee.com/jerryhqx/jichengMAC-back.git
+cd jichengMAC-back
+```
+
+### 2. 拉取 Git LFS 文件
+
+参考视频由 Git LFS 管理。只跑仿真时可以不拉视频；如果要看文档视频，执行：
 
 ```bat
 git lfs install
 git lfs pull
 ```
 
-如果只运行 Verilog 仿真，不拉取视频也不影响编译和仿真。
+### 3. 配置 ModelSim 命令行
 
-## 运行方法
+安装 ModelSim/QuestaSim 后，新开一个 `cmd` 或 PowerShell，检查：
 
-进入仿真运行目录：
+```bat
+vsim -version
+```
+
+如果能打印版本号，说明 `PATH` 已配置好。
+
+如果提示找不到 `vsim`，需要把 ModelSim 的可执行文件目录加入系统 `PATH`。常见路径如下，实际以本机安装目录为准：
+
+```text
+C:\modeltech64_10.5\win64
+C:\modeltech64_10.5\win32
+C:\questasim64_10.7c\win64
+```
+
+也可以不改系统环境变量，直接使用完整路径运行：
+
+```bat
+"C:\modeltech64_10.5\win64\vsim.exe" -c -do "do sim.do; quit -f"
+```
+
+如果启动时报 license 错误，需要按学校机房、实验室服务器或合法授权方式配置 license，例如设置 `LM_LICENSE_FILE`。README 不记录破解流程，避免环境不可复现和授权风险。
+
+### 4. 避免中文路径问题
+
+ModelSim 对中文路径和空格路径兼容性不稳定。本工程当前上级目录可能包含中文，建议映射成英文盘符后再运行：
+
+```bat
+subst X: "D:\study\大三下\集成电路\final_project"
+cd /d X:\new_mac\sim\run
+```
+
+用完后取消映射：
+
+```bat
+subst X: /d
+```
+
+## 仿真脚本配置
+
+本工程脚本使用相对路径，因此必须从 `new_mac/sim/run` 目录启动：
 
 ```bat
 cd new_mac\sim\run
 ```
 
-方式一：使用批处理脚本启动 ModelSim：
+`sim.do` 完成以下工作：
 
-```bat
-run.bat
-```
-
-方式二：直接用 ModelSim 命令行运行：
-
-```bat
-vsim -c -do "do sim.do; quit -f"
-```
-
-`sim.do` 会依次执行：
-
-```text
+```tcl
 vlib ./lib/
 vlib ./lib/work
 vmap work ./lib/work
+
 vlog -f ../filelist/sim_filelist.v
 vlog -f ../filelist/hdl_filelist.v -cover bcesxf
+
 vsim -voptargs=+acc -coverage work.testbench
+log -r /*
+do ./wave.do
 run -all
 ```
 
-如果 ModelSim 对中文路径兼容不好，可以先把工程目录映射到英文盘符：
+两个文件列表的分工如下：
+
+| 文件 | 作用 |
+| --- | --- |
+| `new_mac/sim/filelist/sim_filelist.v` | 编译仿真模型、`top_define.v`、`testbench.v` |
+| `new_mac/sim/filelist/hdl_filelist.v` | 编译 `new_mac/hdl/` 下 MAC 核 RTL |
+
+如果以后增加新的仿真辅助文件，加入 `sim_filelist.v`；如果增加新的 RTL 文件，加入 `hdl_filelist.v`。不要把 testbench 和 RTL 混在一个列表里，出错时不方便定位。
+
+## 运行方法
+
+方式一，打开 ModelSim 图形界面：
+
+```bat
+cd new_mac\sim\run
+run.bat
+```
+
+`run.bat` 实际执行的是：
+
+```bat
+vsim -do sim.do
+```
+
+脚本末尾会删除 `work/`、`transcript`、`vsim.wlf` 等临时文件。如果需要保留 `transcript`，可以临时注释掉 `run.bat` 末尾的清理命令。
+
+方式二，纯命令行运行：
+
+```bat
+cd new_mac\sim\run
+vsim -c -do "do sim.do; quit -f"
+```
+
+如果工程路径包含中文，建议先映射盘符：
 
 ```bat
 subst X: "D:\study\大三下\集成电路\final_project"
@@ -160,7 +267,220 @@ cd /d X:\new_mac\sim\run
 vsim -c -do "do sim.do; quit -f"
 ```
 
-仿真完成后，重点查看下面这些文件：
+## 三端口连接讲解
+
+核心连接在 `new_mac/sim/testbench/testbench.v`。
+
+### 1. 实例化三个 MAC
+
+testbench 里实例化了三套 `MAC_top`：
+
+```verilog
+MAC_top MAC_top_inst1(...);  // Port1
+MAC_top MAC_top_inst2(...);  // Port2
+MAC_top MAC_top_inst3(...);  // Port3
+```
+
+每个 MAC 都有独立的 Host 配置接口：
+
+```verilog
+host_sim U_host_sim (...);   // 配置 Port1
+host_sim U_host_sim2(...);   // 配置 Port2
+host_sim U_host_sim3(...);   // 配置 Port3
+```
+
+这样可以保证三个端口的速率寄存器、水线寄存器都被同步配置。
+
+### 2. Port1 从 ephy 接收外部帧
+
+`ephy` 是仿真 PHY 激励模型，负责产生外部输入帧。它连接到 Port1 的 MII RX 侧：
+
+```verilog
+ephy U_ephy_hm(
+  .Rx_er(hm_Rx_er),
+  .Rx_dv(hm_Rx_dv),
+  .Rxd(hm_Rxd),
+  .mode(mode)
+);
+
+MAC_top MAC_top_inst1(
+  .Rx_er(hm_Rx_er),
+  .Rx_dv(hm_Rx_dv),
+  .Rxd(hm_Rxd),
+  ...
+);
+```
+
+因此，测试帧首先进入 Port1 MAC RX。
+
+### 3. 用户侧 FIFO 串接成 `1 -> 2 -> 3 -> 1`
+
+收到的帧不是直接送回本端口，而是通过用户侧 FIFO 信号送到下一个端口的 TX。
+
+Port1 RX 接到 Port2 TX：
+
+```verilog
+MAC_top_inst2.ff_tx_data = ff_rx_data_mac;
+MAC_top_inst2.ff_tx_mod  = ff_rx_mod_mac;
+MAC_top_inst2.ff_tx_sop  = ff_rx_sop_mac;
+MAC_top_inst2.ff_tx_eop  = ff_rx_eop_mac;
+MAC_top_inst2.ff_tx_wren = ff_rx_dval_mac;
+```
+
+Port2 RX 接到 Port3 TX：
+
+```verilog
+MAC_top_inst3.ff_tx_data = ff_rx_data2;
+MAC_top_inst3.ff_tx_mod  = ff_rx_mod2;
+MAC_top_inst3.ff_tx_sop  = ff_rx_sop2;
+MAC_top_inst3.ff_tx_eop  = ff_rx_eop2;
+MAC_top_inst3.ff_tx_wren = ff_rx_dval2;
+```
+
+Port3 RX 接到 Port1 TX：
+
+```verilog
+MAC_top_inst1.ff_tx_data = ff_rx_data3;
+MAC_top_inst1.ff_tx_mod  = ff_rx_mod3;
+MAC_top_inst1.ff_tx_sop  = ff_rx_sop3;
+MAC_top_inst1.ff_tx_eop  = ff_rx_eop3;
+MAC_top_inst1.ff_tx_wren = ff_rx_dval3;
+```
+
+源码里这些连接是通过 `MAC_top` 例化端口完成的，不是用 `assign` 单独写出来的。对应关系可以在 `MAC_top_inst1`、`MAC_top_inst2`、`MAC_top_inst3` 的 `.ff_tx_*` 和 `.ff_rx_*` 端口处查看。
+
+### 4. Port2 和 Port3 做物理侧回环
+
+Port2、Port3 需要先从 TX 侧发出，再回到自己的 RX 侧，这样才能进入下一段用户侧转发。testbench 中用一段时序逻辑实现物理侧回环：
+
+```verilog
+always @(posedge Rx_clk or posedge reset)
+begin
+    if (reset) begin
+        hm_Rx_er2 <= 1'b0;
+        hm_Rx_dv2 <= 1'b0;
+        hm_Rxd2   <= 8'h00;
+        hm_Rx_er3 <= 1'b0;
+        hm_Rx_dv3 <= 1'b0;
+        hm_Rxd3   <= 8'h00;
+    end else begin
+        hm_Rx_er2 <= hm_Tx_er2;
+        hm_Rx_dv2 <= hm_Tx_en2;
+        hm_Rxd2   <= hm_Txd2;
+        hm_Rx_er3 <= hm_Tx_er3;
+        hm_Rx_dv3 <= hm_Tx_en3;
+        hm_Rxd3   <= hm_Txd3;
+    end
+end
+```
+
+这段逻辑等价于：
+
+```text
+Port2 MII TX: Tx_en/Txd -> Port2 MII RX: Rx_dv/Rxd
+Port3 MII TX: Tx_en/Txd -> Port3 MII RX: Rx_dv/Rxd
+```
+
+Port1 不做本地物理回环，因为 Port1 的 RX 是外部输入，Port1 的 TX 是最终输出。
+
+### 5. ready 信号避免 FIFO 被写爆
+
+`ff_rx_rdy` 表示下游是否能接收当前 MAC RX 输出。三端口串接后，ready 也要跟着下游 TX FIFO 状态走：
+
+```verilog
+assign p1_rx_rdy = rdy & p2_ff_tx_rdy;
+
+MAC_top_inst1.ff_rx_rdy = p1_rx_rdy;
+MAC_top_inst2.ff_rx_rdy = p3_ff_tx_rdy;
+MAC_top_inst3.ff_rx_rdy = p1_ff_tx_rdy;
+```
+
+含义是：
+
+- Port1 只有在全局 `rdy` 有效且 Port2 TX FIFO 准备好时，才把 RX 数据吐给用户侧。
+- Port2 RX 受 Port3 TX FIFO ready 控制。
+- Port3 RX 受 Port1 TX FIFO ready 控制。
+
+## 寄存器和 testcase 配置
+
+`testbench.v` 中的 `CHOOSE_MODE` 是每个 testcase 运行前的主要配置入口。
+
+先配置三个 MAC 的 RX FIFO 水线：
+
+```verilog
+U_host_sim.CPU_wr(7'd22,16'd4);
+U_host_sim.CPU_wr(7'd23,16'd2);
+U_host_sim2.CPU_wr(7'd22,16'd4);
+U_host_sim2.CPU_wr(7'd23,16'd2);
+U_host_sim3.CPU_wr(7'd22,16'd4);
+U_host_sim3.CPU_wr(7'd23,16'd2);
+```
+
+这里 22、23 号寄存器分别配置 `Rx_Hwmark = 4`、`Rx_Lwmark = 2`。这属于本次调试中额外做的稳定性处理：三端口路径比原始单端口自回环更长，1000M 下如果 RX FIFO 水线过大，链路末尾可能排空不及时。
+
+再配置三个 MAC 的工作速率：
+
+```verilog
+if (mode == 0) begin
+    U_host_sim.CPU_wr(7'd34,16'h2);
+    U_host_sim2.CPU_wr(7'd34,16'h2);
+    U_host_sim3.CPU_wr(7'd34,16'h2);
+end else begin
+    U_host_sim.CPU_wr(7'd34,16'h4);
+    U_host_sim2.CPU_wr(7'd34,16'h4);
+    U_host_sim3.CPU_wr(7'd34,16'h4);
+end
+```
+
+34 号寄存器是速率配置：
+
+| `mode` | 寄存器值 | 测试速率 |
+| --- | --- | --- |
+| `1'b0` | `16'h2` | 100M |
+| `1'b1` | `16'h4` | 1000M |
+
+当前有两个 testcase：
+
+| 用例 | 文件 | 速率 | 激励 |
+| --- | --- | --- | --- |
+| `0100000064` | `new_mac/sim/testcase/0100000064.v` | 100M | 100 帧随机长度以太网帧 |
+| `0100000065` | `new_mac/sim/testcase/0100000065.v` | 1000M | 100 帧随机长度以太网帧 |
+
+testcase 基本结构如下：
+
+```verilog
+testcase_name = "0100000064";
+mode = 1'b0;
+U_clockGenerator.RESET;
+CHOOSE_MODE;
+
+repeat(100) begin
+   len = 64 + {$random}%(1518 - 64);
+   U_ephy_hm.send_frame_100M(len, i);
+   i = i + 1;
+end
+
+U_data_cmp.OVER;
+```
+
+1000M 用例调用的是 `send_frame_1000M`，并在结束前额外等待一段时间，保证尾部数据走完整个三端口路径。
+
+## 额外完成的工作
+
+除了把原始自回环改成三端口遍历回环，本工程还做了这些补充工作：
+
+- 增加三套 `MAC_top` 实例和三套 `host_sim` 配置接口，使三个端口都能独立初始化。
+- 将用户侧 FIFO 连接改成 `Port1 RX -> Port2 TX -> Port2 RX -> Port3 TX -> Port3 RX -> Port1 TX`。
+- 为 Port2、Port3 增加物理侧回环逻辑，模拟帧从本端口 TX 回到本端口 RX。
+- 在 `testbench.v` 中增加端口收发计数和 TX FIFO 下溢计数，仿真结束打印 `PORT_COUNTS` 和 `USER_COUNTS`。
+- 修改 `data_cmp.v` 的 `OVER` 任务，在关闭日志前等待输出帧数追上输入帧数，避免三端口长路径下最后几帧被提前截断。
+- 调低三个 MAC 的 RX FIFO 水线，提升 1000M 遍历回环仿真的稳定性。
+- 新增 100M、1000M 两组随机长度帧测试，并保留输入/输出日志。
+- 将 README 拓扑图整理为仓库内相对路径 `./assets/topology.png`，避免外链图片丢失。
+
+## 查看验证结果
+
+仿真结束后重点看：
 
 ```text
 new_mac/sim/run/transcript
@@ -170,90 +490,88 @@ new_mac/sim/in_out/0100000065_indata.log
 new_mac/sim/in_out/0100000065_outdata.log
 ```
 
-也可以在 `transcript` 中搜索：
+在 `transcript` 中搜索：
 
 ```text
-PORT_COUNTS
-USER_COUNTS
 Errors:
 Warnings:
+PORT_COUNTS
+USER_COUNTS
 ```
 
-## 测试用例
-
-| 用例 | 速率 | 入口文件 | 激励 | 预期结果 |
-| --- | --- | --- | --- | --- |
-| `0100000064` | 100M | `new_mac/sim/testcase/0100000064.v` | 100 帧随机长度以太网帧 | 输入日志和最终输出日志一致 |
-| `0100000065` | 1000M | `new_mac/sim/testcase/0100000065.v` | 100 帧随机长度以太网帧 | 输入日志和最终输出日志一致 |
-
-两个 testcase 都由 `new_mac/sim/testbench/testbench.v` 通过 `` `include `` 顺序执行：
-
-```verilog
-`include "../testcase/0100000064.v"
-`include "../testcase/0100000065.v"
-```
-
-## 当前验证结果
-
-当前工程已完成 100M 和 1000M 两组遍历回环验证，编译无错误：
-
-```text
-vlog -f ../filelist/sim_filelist.v    Errors: 0, Warnings: 0
-vlog -f ../filelist/hdl_filelist.v    Errors: 0, Warnings: 0
-```
-
-100M 用例：
+当前工程已得到的计数结果为：
 
 ```text
 PORT_COUNTS 0100000064 p1_tx=100 p2_tx=100 p2_rx=100 p3_tx=100 p3_rx=100
 USER_COUNTS 0100000064 p1_rx=100 p2_rx=100 p3_rx=100 uflow=0/0/0
-```
 
-1000M 用例：
-
-```text
 PORT_COUNTS 0100000065 p1_tx=100 p2_tx=100 p2_rx=100 p3_tx=100 p3_rx=100
 USER_COUNTS 0100000065 p1_rx=100 p2_rx=100 p3_rx=100 uflow=0/0/0
 ```
 
-日志比较结果：
+当前仓库中保留的日志文件每个都是 100 行，输入和最终输出 SHA256 完全一致：
 
-| 用例 | 输入帧数 | 输出帧数 | 结果 |
-| --- | ---: | ---: | --- |
-| `0100000064` | 100 | 100 | 输入/输出日志一致 |
-| `0100000065` | 100 | 100 | 输入/输出日志一致 |
+| 用例 | 输入日志 SHA256 | 输出日志 SHA256 | 结果 |
+| --- | --- | --- | --- |
+| `0100000064` | `EF14C2622EB01BB12C0052A3AD639463646885C4280AB5F53F50BB5754ABAD96` | `EF14C2622EB01BB12C0052A3AD639463646885C4280AB5F53F50BB5754ABAD96` | 一致 |
+| `0100000065` | `D6D5EAB247D20A5EA90CC1B88078CB8F091B623317C230CD212AD2FFA7965CEB` | `D6D5EAB247D20A5EA90CC1B88078CB8F091B623317C230CD212AD2FFA7965CEB` | 一致 |
+
+在 PowerShell 中可以这样复查：
+
+```powershell
+Get-FileHash ..\in_out\0100000064_indata.log, ..\in_out\0100000064_outdata.log -Algorithm SHA256
+Get-FileHash ..\in_out\0100000065_indata.log, ..\in_out\0100000065_outdata.log -Algorithm SHA256
+```
+
+在 `cmd` 中也可以用 Windows 自带 `fc`：
+
+```bat
+fc ..\in_out\0100000064_indata.log ..\in_out\0100000064_outdata.log
+fc ..\in_out\0100000065_indata.log ..\in_out\0100000065_outdata.log
+```
+
+注意 PowerShell 里的 `fc` 是 `Format-Custom` 别名，不是文件比较命令；如果在 PowerShell 中想用 Windows 的 `fc`，需要写成 `cmd /c fc ...`。
 
 ## 常见问题
 
-### 1. GitHub 上看不到参考视频
+### GitHub 或 Gitee 上图片不显示
 
-视频文件使用 Git LFS 管理。克隆后执行：
+检查 README 是否使用了本地相对路径：
 
-```bat
-git lfs pull
+```markdown
+![三端口 MAC 遍历回环拓扑](./assets/topology.png)
 ```
 
-### 2. `vsim` 命令找不到
+不要直接使用 CSDN 图片链接或复制浏览器缓存里的图片地址。图片文件必须真实存在于仓库中，并随代码一起提交。
 
-说明 ModelSim 没有加入系统 `PATH`。可以把 ModelSim 的 `win64` 或 `win32` 目录加入环境变量，或者在 `run.bat` 中把 `vsim` 改成完整路径，例如：
+### `vsim` 找不到
 
-```bat
-"C:\modeltech64_10.5\win64\vsim.exe" -do sim.do
-```
+说明 ModelSim/QuestaSim 没有加入 `PATH`。把安装目录下的 `win64` 或 `win32` 目录加入系统环境变量，或者在命令里使用 `vsim.exe` 的完整路径。
 
-### 3. 中文路径导致脚本或文件打不开
+### 中文路径导致脚本打不开
 
-使用英文路径或 `subst` 映射盘符：
+优先把工程放到纯英文路径，或者用 `subst` 映射盘符：
 
 ```bat
 subst X: "D:\study\大三下\集成电路\final_project"
 cd /d X:\new_mac\sim\run
 ```
 
-### 4. 仿真后生成很多临时文件
+### 运行后出现 `work/`、`lib/`、`vsim.wlf`
 
-ModelSim 可能生成 `work/`、`lib/`、`transcript`、`vsim.wlf` 等文件。这些属于运行产物，不需要提交到 Git。
+这些都是 ModelSim 运行产物。`run.bat` 会清理其中一部分，`.gitignore` 也会忽略常见临时文件。
+
+### 参考视频没有拉下来
+
+执行：
+
+```bat
+git lfs install
+git lfs pull
+```
+
+只做 Verilog 仿真时，不拉取视频不影响编译和运行。
 
 ## 结论
 
-本工程完成了三端口 MAC 遍历回环验证。100M 和 1000M 模式下，100 帧随机长度以太网帧均能按 `1 -> 2 -> 3 -> 1` 的路径传递，最终输出与输入一致，中间端口收发计数一致，发送 FIFO 下溢计数为 0。
+本工程完成了三端口 MAC 遍历回环验证。100M 和 1000M 两种模式下，100 帧随机长度以太网帧均能按 `Port1 -> Port2 -> Port3 -> Port1` 传递，最终输出日志与原始输入日志完全一致，中间端口收发计数一致，三个端口 TX FIFO 下溢计数均为 0。
