@@ -17,4 +17,6 @@ end
 $display("\n %d %s is done!!!-----------------------------------------",$realtime, testcase_name);
 
 #10000;
-U_data_cmp.OVER;
+U_data_cmp_mac1.OVER;
+U_data_cmp_mac2.OVER;
+U_data_cmp_mac3.OVER;

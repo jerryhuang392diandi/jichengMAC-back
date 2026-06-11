@@ -1,11 +1,21 @@
 # 三端口 MAC 遍历回环验证工程
 
 [GitHub 仓库](https://github.com/jerryhuang392diandi/jichengMAC-back) |
-[Gitee 仓库](https://gitee.com/jerryhqx/jichengMAC-back)
+[Gitee 仓库](https://gitee.com/jerryhqx/jichengMAC-back) |
+[更新记录](./CHANGELOG.md)
 
 本仓库是集成电路课程 final project 的 ModelSim 仿真工程。工程基于老师给出的开源以太网 MAC 核和原始自回环仿真环境，将单端口回环验证扩展为三端口遍历回环验证。
 
 本次改造的边界很明确：不修改 `new_mac/hdl/` 下 MAC 核 RTL，只在仿真层新增三端口连接、配置和验证逻辑。最终目标是证明一组以太网帧可以按 `Port1 -> Port2 -> Port3 -> Port1` 的路径完整走完，并且最终从 Port1 发出的数据与最初进入 Port1 的数据一致。
+
+## 最近更新（2026-06-11）
+
+- 将单个 `data_cmp` 扩展为 `MAC1`、`MAC2`、`MAC3` 三个独立监视器，可分别记录每个端口的物理侧输入和输出。
+- 日志文件名增加 MAC 标识，每个 testcase 现在生成 6 份日志，便于逐跳定位数据错误。
+- 修正 `data_cmp.v` 中 TX 信号的延迟采样时钟，由 `Rx_clk` 改为对应的 `Tx_clk`。
+- 两个 testcase 在结束时依次等待并关闭三个监视器，避免日志未完整写入。
+- 使用 ModelSim 10.4 重新完成 100M 和 1000M 仿真：每种模式 100 帧，编译与仿真均为 0 错误、0 警告，三个 MAC 的输入输出日志逐对一致。
+- 增加最终课程报告 `集成电路导论大作业报告.pdf`，并整理本地文档与仿真产物的忽略规则。
 
 ## 验证拓扑
 
@@ -28,14 +38,18 @@ ephy 外部帧激励
   -> data_cmp 记录最终输出
 ```
 
-`data_cmp` 同时监听 Port1 的物理侧输入和最终物理侧输出，生成：
+三个 `data_cmp` 实例分别监听 Port1、Port2、Port3 的物理侧输入和输出，生成：
 
 ```text
-new_mac/sim/in_out/<testcase>_indata.log
-new_mac/sim/in_out/<testcase>_outdata.log
+new_mac/sim/in_out/<testcase>_MAC1_indata.log
+new_mac/sim/in_out/<testcase>_MAC1_outdata.log
+new_mac/sim/in_out/<testcase>_MAC2_indata.log
+new_mac/sim/in_out/<testcase>_MAC2_outdata.log
+new_mac/sim/in_out/<testcase>_MAC3_indata.log
+new_mac/sim/in_out/<testcase>_MAC3_outdata.log
 ```
 
-比较这两个日志即可判断三端口遍历之后数据是否保持一致。
+逐对比较三个 MAC 的输入输出日志，可以同时确认最终结果和每一跳物理侧回环的数据一致性。
 
 ## MAC 核背景
 
@@ -84,10 +98,8 @@ new_mac/sim/in_out/<testcase>_outdata.log
 │       │   ├── rtl.f
 │       │   └── sim_filelist.v
 │       ├── in_out/
-│       │   ├── 0100000064_indata.log
-│       │   ├── 0100000064_outdata.log
-│       │   ├── 0100000065_indata.log
-│       │   └── 0100000065_outdata.log
+│       │   ├── 0100000064_MAC[1-3]_[in|out]data.log
+│       │   └── 0100000065_MAC[1-3]_[in|out]data.log
 │       ├── run/
 │       │   ├── modelsim.ini
 │       │   ├── run.bat
@@ -101,6 +113,7 @@ new_mac/sim/in_out/<testcase>_outdata.log
 │           └── 0100000065.v
 ├── .gitattributes
 ├── .gitignore
+├── 集成电路导论大作业报告.pdf
 ├── LICENSE
 └── README.md
 ```
@@ -111,7 +124,7 @@ new_mac/sim/in_out/<testcase>_outdata.log
 - `new_mac/sim/testbench/testbench.v` 是三端口连接和验证逻辑的核心文件。
 - `new_mac/sim/bfm/ephy.v` 负责产生外部以太网帧激励。
 - `new_mac/sim/bfm/host_sim.v` 负责模拟 CPU 写寄存器，配置 MAC 工作模式。
-- `new_mac/sim/bfm/data_cmp.v` 负责记录输入输出日志。
+- `new_mac/sim/bfm/data_cmp.v` 是可参数化的数据监视器，负责分别记录三个 MAC 的输入输出日志。
 - `new_mac/sim/run/sim.do` 是 ModelSim 编译、加载、运行脚本。
 
 ## 顶层引脚说明
@@ -473,10 +486,12 @@ U_data_cmp.OVER;
 - 将用户侧 FIFO 连接改成 `Port1 RX -> Port2 TX -> Port2 RX -> Port3 TX -> Port3 RX -> Port1 TX`。
 - 为 Port2、Port3 增加物理侧回环逻辑，模拟帧从本端口 TX 回到本端口 RX。
 - 在 `testbench.v` 中增加端口收发计数和 TX FIFO 下溢计数，仿真结束打印 `PORT_COUNTS` 和 `USER_COUNTS`。
-- 修改 `data_cmp.v` 的 `OVER` 任务，在关闭日志前等待输出帧数追上输入帧数，避免三端口长路径下最后几帧被提前截断。
+- 将 `data_cmp.v` 参数化为 `MAC1`、`MAC2`、`MAC3` 三个监视器，并修正 TX 信号使用 `Tx_clk` 采样。
+- 修改 `data_cmp.v` 的 `OVER` 任务，在关闭日志前等待输出帧数追上输入帧数；两个 testcase 会依次结束三个监视器，避免最后几帧被提前截断。
 - 调低三个 MAC 的 RX FIFO 水线，提升 1000M 遍历回环仿真的稳定性。
 - 新增 100M、1000M 两组随机长度帧测试，并保留输入/输出日志。
 - 将 README 拓扑图整理为仓库内相对路径 `./assets/topology.png`，避免外链图片丢失。
+- 补充最终课程报告，并忽略本地发布稿、个人导出报告和 ModelSim 运行产物。
 
 ## 查看验证结果
 
@@ -484,10 +499,18 @@ U_data_cmp.OVER;
 
 ```text
 new_mac/sim/run/transcript
-new_mac/sim/in_out/0100000064_indata.log
-new_mac/sim/in_out/0100000064_outdata.log
-new_mac/sim/in_out/0100000065_indata.log
-new_mac/sim/in_out/0100000065_outdata.log
+new_mac/sim/in_out/0100000064_MAC1_indata.log
+new_mac/sim/in_out/0100000064_MAC1_outdata.log
+new_mac/sim/in_out/0100000064_MAC2_indata.log
+new_mac/sim/in_out/0100000064_MAC2_outdata.log
+new_mac/sim/in_out/0100000064_MAC3_indata.log
+new_mac/sim/in_out/0100000064_MAC3_outdata.log
+new_mac/sim/in_out/0100000065_MAC1_indata.log
+new_mac/sim/in_out/0100000065_MAC1_outdata.log
+new_mac/sim/in_out/0100000065_MAC2_indata.log
+new_mac/sim/in_out/0100000065_MAC2_outdata.log
+new_mac/sim/in_out/0100000065_MAC3_indata.log
+new_mac/sim/in_out/0100000065_MAC3_outdata.log
 ```
 
 在 `transcript` 中搜索：
@@ -509,25 +532,26 @@ PORT_COUNTS 0100000065 p1_tx=100 p2_tx=100 p2_rx=100 p3_tx=100 p3_rx=100
 USER_COUNTS 0100000065 p1_rx=100 p2_rx=100 p3_rx=100 uflow=0/0/0
 ```
 
-当前仓库中保留的日志文件每个都是 100 行，输入和最终输出 SHA256 完全一致：
+2026-06-11 使用 ModelSim 10.4 重新验证，仿真编译与运行均为 `Errors: 0, Warnings: 0`。每个监视器记录 100 帧，三个 MAC 的输入输出 SHA256 逐对一致：
 
-| 用例 | 输入日志 SHA256 | 输出日志 SHA256 | 结果 |
+| 用例 | 监视器 | 输入/输出 SHA256 | 结果 |
 | --- | --- | --- | --- |
-| `0100000064` | `EF14C2622EB01BB12C0052A3AD639463646885C4280AB5F53F50BB5754ABAD96` | `EF14C2622EB01BB12C0052A3AD639463646885C4280AB5F53F50BB5754ABAD96` | 一致 |
-| `0100000065` | `D6D5EAB247D20A5EA90CC1B88078CB8F091B623317C230CD212AD2FFA7965CEB` | `D6D5EAB247D20A5EA90CC1B88078CB8F091B623317C230CD212AD2FFA7965CEB` | 一致 |
+| `0100000064`（100M） | `MAC1` / `MAC2` / `MAC3` | `EF14C2622EB01BB12C0052A3AD639463646885C4280AB5F53F50BB5754ABAD96` | 三组均一致 |
+| `0100000065`（1000M） | `MAC1` / `MAC2` / `MAC3` | `D6D5EAB247D20A5EA90CC1B88078CB8F091B623317C230CD212AD2FFA7965CEB` | 三组均一致 |
 
 在 PowerShell 中可以这样复查：
 
 ```powershell
-Get-FileHash ..\in_out\0100000064_indata.log, ..\in_out\0100000064_outdata.log -Algorithm SHA256
-Get-FileHash ..\in_out\0100000065_indata.log, ..\in_out\0100000065_outdata.log -Algorithm SHA256
+Get-FileHash ..\in_out\0100000064_MAC*_*.log -Algorithm SHA256
+Get-FileHash ..\in_out\0100000065_MAC*_*.log -Algorithm SHA256
 ```
 
 在 `cmd` 中也可以用 Windows 自带 `fc`：
 
 ```bat
-fc ..\in_out\0100000064_indata.log ..\in_out\0100000064_outdata.log
-fc ..\in_out\0100000065_indata.log ..\in_out\0100000065_outdata.log
+fc ..\in_out\0100000064_MAC1_indata.log ..\in_out\0100000064_MAC1_outdata.log
+fc ..\in_out\0100000064_MAC2_indata.log ..\in_out\0100000064_MAC2_outdata.log
+fc ..\in_out\0100000064_MAC3_indata.log ..\in_out\0100000064_MAC3_outdata.log
 ```
 
 注意 PowerShell 里的 `fc` 是 `Format-Custom` 别名，不是文件比较命令；如果在 PowerShell 中想用 Windows 的 `fc`，需要写成 `cmd /c fc ...`。
@@ -574,4 +598,4 @@ git lfs pull
 
 ## 结论
 
-本工程完成了三端口 MAC 遍历回环验证。100M 和 1000M 两种模式下，100 帧随机长度以太网帧均能按 `Port1 -> Port2 -> Port3 -> Port1` 传递，最终输出日志与原始输入日志完全一致，中间端口收发计数一致，三个端口 TX FIFO 下溢计数均为 0。
+本工程完成了三端口 MAC 遍历回环验证。100M 和 1000M 两种模式下，100 帧随机长度以太网帧均能按 `Port1 -> Port2 -> Port3 -> Port1` 传递，三个 MAC 监视器的输入输出日志逐对一致，中间端口收发计数一致，三个端口 TX FIFO 下溢计数均为 0。

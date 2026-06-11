@@ -395,7 +395,9 @@ MAC_top MAC_top_inst1
   
 
 
-data_cmp U_data_cmp(
+data_cmp #(
+    .MONITOR_NAME("MAC1")
+) U_data_cmp_mac1(
 	.Rx_clk(Rx_clk)	, 
 	.Tx_clk(Tx_clk)	, 
 	.Tx_er ()	, 
@@ -407,6 +409,38 @@ data_cmp U_data_cmp(
     .reset (reset),
     .testcase_name(testcase_name),	
 	.mode  (mode)	
+	);
+
+data_cmp #(
+    .MONITOR_NAME("MAC2")
+) U_data_cmp_mac2(
+	.Rx_clk(Rx_clk)	,
+	.Tx_clk(Tx_clk)	,
+	.Tx_er (hm_Tx_er2)	,
+	.Tx_en (hm_Tx_en2)	,
+	.Txd   (hm_Txd2)	,
+	.Rx_er (hm_Rx_er2)	,
+	.Rx_dv (hm_Rx_dv2)	,
+	.Rxd   (hm_Rxd2)	,
+    .reset (reset),
+    .testcase_name(testcase_name),
+	.mode  (mode)
+	);
+
+data_cmp #(
+    .MONITOR_NAME("MAC3")
+) U_data_cmp_mac3(
+	.Rx_clk(Rx_clk)	,
+	.Tx_clk(Tx_clk)	,
+	.Tx_er (hm_Tx_er3)	,
+	.Tx_en (hm_Tx_en3)	,
+	.Txd   (hm_Txd3)	,
+	.Rx_er (hm_Rx_er3)	,
+	.Rx_dv (hm_Rx_dv3)	,
+	.Rxd   (hm_Rxd3)	,
+    .reset (reset),
+    .testcase_name(testcase_name),
+	.mode  (mode)
 	);
 	
 host_sim U_host_sim(

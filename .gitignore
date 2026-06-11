@@ -16,3 +16,7 @@ Thumbs.db
 transcript
 work/
 _info
+
+# Local/exported documents
+/README_CSDN.md
+/集成大作业报告*.pdf

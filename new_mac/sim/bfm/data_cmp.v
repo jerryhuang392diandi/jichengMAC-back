@@ -1,6 +1,8 @@
 `timescale 1ns/1ps
 
-module data_cmp(
+module data_cmp #(
+parameter [8*4:1] MONITOR_NAME = "MAC1"
+)(
 Rx_clk, 
 Tx_clk, 
 Tx_er , 
@@ -52,11 +54,11 @@ begin
 	frm_cnt2 = 1;
 	cnt1 = 0;  
 	cnt2 = 0;
-	File_handle1 = $fopen({"../in_out/",testcase_name,"_indata.log"}); 
+	File_handle1 = $fopen({"../in_out/",testcase_name,"_",MONITOR_NAME,"_indata.log"});
    // if(!File_handle1)
       // $display("could not open mii_in.txt");
 	// File_handle2 = $fopen("E:/vproject/new_mac/sim/in_out/mii_out.txt"); 
-	File_handle2 = $fopen({"../in_out/",testcase_name,"_outdata.log"}); 	
+	File_handle2 = $fopen({"../in_out/",testcase_name,"_",MONITOR_NAME,"_outdata.log"});
    // if(!File_handle2)
       // $display("could not open mii_out.txt");
 end
@@ -73,8 +75,8 @@ begin
     end
     repeat(20) @(posedge Tx_clk);
     if (frm_cnt2 < frm_cnt1)
-        $display("WARNING: %s output frames did not catch input frames, in=%0d out=%0d",
-                 testcase_name, frm_cnt1 - 1, frm_cnt2 - 1);
+        $display("WARNING: %s %s output frames did not catch input frames, in=%0d out=%0d",
+                 testcase_name, MONITOR_NAME, frm_cnt1 - 1, frm_cnt2 - 1);
 
     $fclose(File_handle1); 
     $fclose(File_handle2);
@@ -90,7 +92,7 @@ begin
 	Rx_dv_delay <= Rx_dv;
 end
 
-always@(posedge Rx_clk)
+always@(posedge Tx_clk)
 begin
 	Tx_en_delay <= Tx_en;
 end
